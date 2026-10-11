@@ -95,7 +95,7 @@ const cities=[
 const $=id=>document.getElementById(id);let selected='denver',saved=new Set(),notes={},pois=[],poiModeActive=false,cityLayers={},heatLayers={},poiLayers={};
 let connectionLayer,exploredTownLayer,exploredTown=null;
 const map=L.map('map',{scrollWheelZoom:true}).setView([39.5,-98.35],4);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
 connectionLayer=L.layerGroup().addTo(map);exploredTownLayer=L.layerGroup().addTo(map);
 const fmt=n=>'$'+Math.round(n).toLocaleString('en-US');const mode=()=> $('housingMode').value;const housing=c=>mode()==='buy'?c.buy:c.rent;
 function distMiles(a,b){const R=3958.8,p=Math.PI/180,dLat=(b.lat-a.lat)*p,dLon=(b.lon-a.lon)*p;const x=Math.sin(dLat/2)**2+Math.cos(a.lat*p)*Math.cos(b.lat*p)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
