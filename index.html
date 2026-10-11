@@ -24,8 +24,8 @@
 <div class="inline"><div><label class="small" for="beds">Bedrooms</label><select id="beds"><option value="">Any</option><option value="0">Studio</option><option value="1">1 bedroom</option><option value="2">2 bedrooms</option><option value="3">3 bedrooms</option><option value="4">4+ bedrooms</option></select></div>
 <div><label class="small" for="baths">Bathrooms</label><select id="baths"><option value="">Any</option><option value="1">1+ bath</option><option value="2">2+ baths</option><option value="3">3+ baths</option><option value="4">4+ baths</option></select></div></div>
 <div style="margin-top:8px"><label class="small" for="listingLocation">City or area</label><input id="listingLocation" type="text" placeholder="Optional: e.g. Denver, CO"></div>
-<div class="statgrid" style="margin-top:10px"><div class="stat" style="grid-column:1/-1"><strong id="listingCount">—</strong><span id="listingCountLabel">Listings matching your filters</span></div></div>
-<p class="small" id="listingCountNote" style="margin-bottom:0">Live listing inventory is not connected yet, so a verified current count is unavailable.</p>
+<button id="searchListingsBtn" class="primary" style="margin-top:10px;width:100%">Search live listings</button><div class="statgrid" style="margin-top:10px"><div class="stat" style="grid-column:1/-1"><strong id="listingCount">—</strong><span id="listingCountLabel">Listings matching your filters</span></div></div>
+<p class="small" id="listingCountNote" style="margin-bottom:0">Enter a city and state or ZIP code to search.</p><div id="listingResults" style="max-height:280px;overflow:auto;margin-top:10px"></div>
 </div>
 <div class="section"><div class="labelrow"><label for="outdoor">Outdoor access</label><span class="value" id="outdoorVal">7/10</span></div><input id="outdoor" type="range" min="0" max="10" value="7"></div>
 <div class="section"><div class="labelrow"><label for="walk">Walkability</label><span class="value" id="walkVal">6/10</span></div><input id="walk" type="range" min="0" max="10" value="6"></div>
@@ -100,18 +100,38 @@ $('fitBtn').onclick=()=>map.fitBounds([[24,-125],[50, -66]]);$('clearSavedBtn').
 $('resetBtn').onclick=()=>{ $('housingMode').value='rent';$('beds').value='';$('baths').value='';$('listingLocation').value='';$('budget').value=1800;$('outdoor').value=7;$('walk').value=6;$('jobs').value=5;$('climate').value=4;$('poisImportance').value=7;$('hardBudget').checked=false;$('showHeat').checked=true;$('showPins').checked=true;refresh()};
 $('exportBtn').onclick=()=>{const data={shortlist:[...saved].map(id=>cities.find(c=>c.id===id)),pois,notes,preferences:{housingMode:mode(),maxHousing:+$('budget').value,}};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='nexthome-shortlist.json';a.click();URL.revokeObjectURL(url)};
 
-// Listing-count placeholder: intentionally does not invent a live count.
+// Live listings via secure Vercel /api/listings endpoint.
+let listingMarkers=L.layerGroup().addTo(map);
+let listingTimer;
+function escapeText(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function updateListingCount(){
- const beds=$('beds').value,baths=$('baths').value,loc=$('listingLocation').value.trim();
- const chosen=($('housingMode').value==='rent'?'rent':'mortgage');
- const filled=!!beds && !!baths;
+ clearTimeout(listingTimer);
  $('listingCount').textContent='—';
- $('listingCountLabel').textContent=filled?'Current '+chosen+' listings matching filters':'Choose bedrooms and bathrooms';
- $('listingCountNote').textContent=filled
-  ? 'A verified current count will appear here once a live listing source is connected'+(loc?(' for '+loc):'')+'. Live inventory is not connected in this prototype.'
-  : 'Select bedroom and bathroom requirements to prepare the listing search. A real current count requires a live listing feed.';
+ $('listingCountLabel').textContent='Active listings';
+ $('listingCountNote').textContent='Enter a city and state (e.g. Denver, CO), or ZIP code, then select Search listings.';
 }
-['beds','baths','listingLocation','housingMode'].forEach(id=>$(id).addEventListener('change',updateListingCount));
+async function searchListings(){
+ const loc=$('listingLocation').value.trim();
+ const params=new URLSearchParams({location:loc,mode:mode(),beds:$('beds').value,baths:$('baths').value,budget:$('budget').value});
+ $('listingCount').textContent='…';
+ $('listingCountNote').textContent='Checking active listings…';
+ $('listingResults').textContent='';
+ listingMarkers.clearLayers();
+ try{
+  const response=await fetch('/api/listings?'+params);
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||'Unable to load listings.');
+  $('listingCount').textContent=data.count===null?'—':data.count.toLocaleString();
+  $('listingCountLabel').textContent=data.count===null?'Matching active listings (total unavailable)':'Matching active listings';
+  $('listingCountNote').textContent='RentCast · checked '+new Date(data.updatedAt).toLocaleString()+' · showing '+data.returned+' recent results.'+(mode()==='buy'?' Sale prices are not filtered by monthly mortgage budget.':'');
+  $('listingResults').innerHTML=data.listings.map(x=>'<div style="padding:9px 0;border-top:1px solid #e1e8e3"><strong>'+escapeText(x.address)+'</strong><div class="small">'+fmt(x.price)+(mode()==='rent'?'/mo':' sale price')+' · '+escapeText(x.beds)+' beds · '+escapeText(x.baths)+' baths</div></div>').join('')||'<p class="small">No matching active listings returned.</p>';
+  const bounds=[];
+  data.listings.forEach(x=>{if(!Number.isFinite(x.lat)||!Number.isFinite(x.lon))return;const point=[x.lat,x.lon];bounds.push(point);L.marker(point).bindPopup('<strong>'+escapeText(x.address)+'</strong><div>'+fmt(x.price)+(mode()==='rent'?'/mo':'')+'</div><div>'+escapeText(x.beds)+' beds · '+escapeText(x.baths)+' baths</div>').addTo(listingMarkers);});
+  if(bounds.length)map.fitBounds(bounds,{padding:[25,25],maxZoom:12});
+ }catch(e){$('listingCount').textContent='—';$('listingCountNote').textContent=e.message;}
+}
+$('searchListingsBtn').addEventListener('click',searchListings);
+['beds','baths','listingLocation','housingMode','budget'].forEach(id=>$(id).addEventListener('change',updateListingCount));
 $('listingLocation').addEventListener('input',updateListingCount);
 
 try{notes=JSON.parse(localStorage.getItem('nexthomeNotes')||'{}')}catch(e){notes={}}
